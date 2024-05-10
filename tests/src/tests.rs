@@ -369,9 +369,15 @@ impl TLC {
     }
 }
 
+struct AugmentedTransaction {
+    tx: super::TransactionView,
+    lock_script: Script,
+    witness_script: Vec<u8>,
+}
+
 struct CommitmentLockContext {
     context: Context,
-    lock_script: Script,
+    lock_script_outpoint: OutPoint,
     cell_deps: CellDepVec,
 }
 
@@ -384,19 +390,16 @@ impl CommitmentLockContext {
         let auth_bin = loader.load_binary("../../deps/auth");
         let commitment_lock_out_point = context.deploy_cell(commitment_lock_bin);
         let auth_out_point = context.deploy_cell(auth_bin);
-        let lock_script = context
-            .build_script(&commitment_lock_out_point, Bytes::new().into())
-            .expect("script");
 
         // prepare cell deps
         let commitment_lock_dep = CellDep::new_builder()
-            .out_point(commitment_lock_out_point)
+            .out_point(commitment_lock_out_point.clone())
             .build();
         let auth_dep = CellDep::new_builder().out_point(auth_out_point).build();
         let cell_deps = vec![commitment_lock_dep, auth_dep].pack();
         Self {
             context,
-            lock_script,
+            lock_script_outpoint: commitment_lock_out_point,
             cell_deps,
         }
     }
@@ -454,7 +457,7 @@ impl CommitmentLockContext {
         local_delay_epoch_key: Pubkey,
         revocation_key: Pubkey,
         tlcs: Vec<TLC>,
-    ) -> (OutPoint, Vec<u8>) {
+    ) -> (OutPoint, Vec<u8>, Script) {
         let witness_script = self.get_witnesses(
             local_delay_epoch,
             local_delay_epoch_key,
@@ -465,11 +468,9 @@ impl CommitmentLockContext {
         let args = blake2b_256(&witness_script)[0..20].to_vec();
 
         let lock_script = self
-            .lock_script
-            .clone()
-            .as_builder()
-            .args(args.pack())
-            .build();
+            .context
+            .build_script(&self.lock_script_outpoint, args.into())
+            .expect("script");
 
         // prepare cells
         (
@@ -481,10 +482,11 @@ impl CommitmentLockContext {
                 Bytes::new(),
             ),
             witness_script,
+            lock_script,
         )
     }
 
-    fn create_tx_with_aux_data(
+    fn create_augmented_tx(
         &mut self,
         capacity: u64,
         local_delay_epoch: Since,
@@ -493,14 +495,15 @@ impl CommitmentLockContext {
         tlcs: Vec<TLC>,
         outputs: Vec<CellOutput>,
         outputs_data: Vec<Bytes>,
-    ) -> (super::TransactionView, Vec<u8>) {
-        let (input_out_point, witness_script) = self.create_commitment_cell_with_aux_data(
-            capacity,
-            local_delay_epoch,
-            local_delay_epoch_key,
-            revocation_key,
-            tlcs,
-        );
+    ) -> AugmentedTransaction {
+        let (input_out_point, witness_script, lock_script) = self
+            .create_commitment_cell_with_aux_data(
+                capacity,
+                local_delay_epoch,
+                local_delay_epoch_key,
+                revocation_key,
+                tlcs,
+            );
 
         let input = CellInput::new_builder()
             .previous_output(input_out_point.clone())
@@ -513,7 +516,12 @@ impl CommitmentLockContext {
             .outputs(outputs)
             .outputs_data(outputs_data.pack())
             .build();
-        (tx, witness_script)
+
+        AugmentedTransaction {
+            tx,
+            lock_script,
+            witness_script,
+        }
     }
 }
 
@@ -579,7 +587,11 @@ fn test_commitment_lock_with_two_pending_htlcs() {
     ];
     let outputs_data = vec![Bytes::new(); 2];
 
-    let (tx, witness_script2) = context.create_tx_with_aux_data(
+    let AugmentedTransaction {
+        tx,
+        lock_script,
+        witness_script,
+    } = context.create_augmented_tx(
         500 * BYTE_SHANNONS,
         local_delay_epoch,
         local_delay_epoch_key.1.clone(),
@@ -591,8 +603,8 @@ fn test_commitment_lock_with_two_pending_htlcs() {
     let input_out_point = tx.inputs().get(0).unwrap().previous_output();
     let CommitmentLockContext {
         mut context,
-        lock_script,
         cell_deps,
+        lock_script_outpoint: lock_script1,
     } = context;
 
     let witness_script2 = [
@@ -613,11 +625,15 @@ fn test_commitment_lock_with_two_pending_htlcs() {
         expiry2.as_u64().to_le_bytes().to_vec(),
     ]
     .concat();
+    assert_eq!(witness_script.clone(), witness_script2.clone());
 
     let args2 = blake2b_256(&witness_script2)[0..20].to_vec();
 
-    let lock_script = lock_script.as_builder().args(args2.pack()).build();
-    // assert_eq!(local_script, tx.input_pts_iter().next().unwrap());
+    assert_eq!(lock_script.args(), args2.pack());
+
+    let lock_script2 = lock_script.clone().as_builder().args(args2.pack()).build();
+    assert_eq!(lock_script.as_bytes(), lock_script2.as_bytes());
+
     // prepare cells
     let input_out_point = context.create_cell(
         CellOutput::new_builder()
@@ -645,13 +661,13 @@ fn test_commitment_lock_with_two_pending_htlcs() {
 
     let outputs_data = vec![Bytes::new(); 2];
 
-    // build transaction with revocation unlock logic
-    let tx = TransactionBuilder::default()
-        .cell_deps(cell_deps.clone())
-        .input(input)
-        .outputs(outputs.clone())
-        .outputs_data(outputs_data.pack())
-        .build();
+    // // build transaction with revocation unlock logic
+    // let tx = TransactionBuilder::default()
+    //     .cell_deps(cell_deps.clone())
+    //     .input(input)
+    //     .outputs(outputs.clone())
+    //     .outputs_data(outputs_data.pack())
+    //     .build();
 
     {
         // sign with revocation key
