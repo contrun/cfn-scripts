@@ -420,6 +420,7 @@ impl CommitmentLockContext {
             remote_pubkey: remote_htlc_key1,
             local_pubkey: local_htlc_key1,
             lock_time: expiry1,
+            is_offered: is_offered1,
             ..
         } = &tlcs[0];
         let TLC {
@@ -428,19 +429,20 @@ impl CommitmentLockContext {
             remote_pubkey: remote_htlc_key2,
             local_pubkey: local_htlc_key2,
             lock_time: expiry2,
+            is_offered: is_offered2,
             ..
         } = &tlcs[1];
         let witness_script = [
             local_delay_epoch.as_u64().to_le_bytes().to_vec(),
             blake2b_256(local_delay_epoch_key.serialize())[0..20].to_vec(),
             blake2b_256(revocation_key.serialize())[0..20].to_vec(),
-            [0u8].to_vec(),
+            (if *is_offered1 { [0] } else { [1] }).to_vec(),
             payment_amount1.to_le_bytes().to_vec(),
             blake2b_256(preimage1)[0..20].to_vec(),
             blake2b_256(remote_htlc_key1.serialize())[0..20].to_vec(),
             blake2b_256(local_htlc_key1.serialize())[0..20].to_vec(),
             expiry1.as_u64().to_le_bytes().to_vec(),
-            [1u8].to_vec(),
+            (if *is_offered2 { [0] } else { [1] }).to_vec(),
             payment_amount2.to_le_bytes().to_vec(),
             blake2b_256(preimage2)[0..20].to_vec(),
             blake2b_256(remote_htlc_key2.serialize())[0..20].to_vec(),
@@ -550,7 +552,7 @@ fn test_commitment_lock_with_two_pending_htlcs() {
     let tlcs = vec![
         TLC::new(
             0,
-            false,
+            true,
             payment_amount1,
             expiry1,
             preimage1,
@@ -560,7 +562,7 @@ fn test_commitment_lock_with_two_pending_htlcs() {
         ),
         TLC::new(
             1,
-            true,
+            false,
             payment_amount2,
             expiry2,
             preimage2,
