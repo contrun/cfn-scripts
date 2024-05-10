@@ -395,6 +395,7 @@ impl CommitmentLockContext {
         let commitment_lock_dep = CellDep::new_builder()
             .out_point(commitment_lock_out_point.clone())
             .build();
+        dbg!(&commitment_lock_out_point);
         let auth_dep = CellDep::new_builder().out_point(auth_out_point).build();
         let cell_deps = vec![commitment_lock_dep, auth_dep].pack();
         Self {
@@ -600,41 +601,12 @@ fn test_commitment_lock_with_two_pending_htlcs() {
         outputs.clone(),
         outputs_data.clone(),
     );
-    let input_out_point = tx.inputs().get(0).unwrap().previous_output();
     let CommitmentLockContext {
         mut context,
         cell_deps,
-        lock_script_outpoint: lock_script1,
+        lock_script_outpoint: _,
     } = context;
 
-    let witness_script2 = [
-        local_delay_epoch.as_u64().to_le_bytes().to_vec(),
-        blake2b_256(local_delay_epoch_key.1.serialize())[0..20].to_vec(),
-        blake2b_256(revocation_key.1.serialize())[0..20].to_vec(),
-        [0u8].to_vec(),
-        payment_amount1.to_le_bytes().to_vec(),
-        blake2b_256(preimage1)[0..20].to_vec(),
-        blake2b_256(remote_htlc_key1.1.serialize())[0..20].to_vec(),
-        blake2b_256(local_htlc_key1.1.serialize())[0..20].to_vec(),
-        expiry1.as_u64().to_le_bytes().to_vec(),
-        [1u8].to_vec(),
-        payment_amount2.to_le_bytes().to_vec(),
-        blake2b_256(preimage2)[0..20].to_vec(),
-        blake2b_256(remote_htlc_key2.1.serialize())[0..20].to_vec(),
-        blake2b_256(local_htlc_key2.1.serialize())[0..20].to_vec(),
-        expiry2.as_u64().to_le_bytes().to_vec(),
-    ]
-    .concat();
-    assert_eq!(witness_script.clone(), witness_script2.clone());
-
-    let args2 = blake2b_256(&witness_script2)[0..20].to_vec();
-
-    assert_eq!(lock_script.args(), args2.pack());
-
-    let lock_script2 = lock_script.clone().as_builder().args(args2.pack()).build();
-    assert_eq!(lock_script.as_bytes(), lock_script2.as_bytes());
-
-    // prepare cells
     let input_out_point = context.create_cell(
         CellOutput::new_builder()
             .capacity((1000 * BYTE_SHANNONS).pack())
@@ -642,32 +614,6 @@ fn test_commitment_lock_with_two_pending_htlcs() {
             .build(),
         Bytes::new(),
     );
-    let input = CellInput::new_builder()
-        .previous_output(input_out_point.clone())
-        .build();
-    let output_lock = Script::new_builder()
-        .args(Bytes::from("output_lock").pack())
-        .build();
-    let outputs = vec![
-        CellOutput::new_builder()
-            .capacity((500 * BYTE_SHANNONS).pack())
-            .lock(output_lock.clone())
-            .build(),
-        CellOutput::new_builder()
-            .capacity((500 * BYTE_SHANNONS).pack())
-            .lock(output_lock.clone())
-            .build(),
-    ];
-
-    let outputs_data = vec![Bytes::new(); 2];
-
-    // // build transaction with revocation unlock logic
-    // let tx = TransactionBuilder::default()
-    //     .cell_deps(cell_deps.clone())
-    //     .input(input)
-    //     .outputs(outputs.clone())
-    //     .outputs_data(outputs_data.pack())
-    //     .build();
 
     {
         // sign with revocation key
@@ -678,7 +624,7 @@ fn test_commitment_lock_with_two_pending_htlcs() {
             .sign_recoverable(&message.into())
             .unwrap()
             .serialize();
-        let witness = [witness_script2.clone(), vec![0xFF], signature].concat();
+        let witness = [witness_script.clone(), vec![0xFF], signature].concat();
 
         let tx = tx.as_advanced_builder().witness(witness.pack()).build();
         println!("tx: {:?}", tx);
@@ -714,7 +660,7 @@ fn test_commitment_lock_with_two_pending_htlcs() {
             .sign_recoverable(&message.into())
             .unwrap()
             .serialize();
-        let witness = [witness_script2.clone(), vec![0xFF], signature].concat();
+        let witness = [witness_script.clone(), vec![0xFF], signature].concat();
 
         let tx = tx.as_advanced_builder().witness(witness.pack()).build();
         println!("tx: {:?}", tx);
@@ -770,7 +716,7 @@ fn test_commitment_lock_with_two_pending_htlcs() {
             .unwrap()
             .serialize();
         let witness = [
-            witness_script2.clone(),
+            witness_script.clone(),
             vec![0x00],
             signature,
             preimage1.to_vec(),
@@ -820,7 +766,7 @@ fn test_commitment_lock_with_two_pending_htlcs() {
             .unwrap()
             .serialize();
         let witness = [
-            witness_script2.clone(),
+            witness_script.clone(),
             vec![0x00],
             signature,
             preimage1.to_vec(),
@@ -881,7 +827,7 @@ fn test_commitment_lock_with_two_pending_htlcs() {
             .sign_recoverable(&message.into())
             .unwrap()
             .serialize();
-        let witness = [witness_script2.clone(), vec![0x01], signature].concat();
+        let witness = [witness_script.clone(), vec![0x01], signature].concat();
 
         let tx = tx.as_advanced_builder().witness(witness.pack()).build();
         println!("tx: {:?}", tx);
@@ -917,7 +863,7 @@ fn test_commitment_lock_with_two_pending_htlcs() {
             .unwrap()
             .serialize();
         let witness = [
-            witness_script2.clone(),
+            witness_script.clone(),
             vec![0x01],
             signature,
             preimage2.to_vec(),
