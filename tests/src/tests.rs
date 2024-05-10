@@ -296,15 +296,47 @@ fn test_commitment_lock_no_pending_htlcs() {
     println!("consume cycles: {}", cycles);
 }
 
+struct CommitmentLockContext {
+    context: Context,
+    lock_script: Script,
+    cell_deps: CellDepVec,
+}
+
+impl CommitmentLockContext {
+    fn new() -> Self {
+        // deploy contract
+        let mut context = Context::default();
+        let loader = Loader::default();
+        let commitment_lock_bin = loader.load_binary("commitment-lock");
+        let auth_bin = loader.load_binary("../../deps/auth");
+        let commitment_lock_out_point = context.deploy_cell(commitment_lock_bin);
+        let auth_out_point = context.deploy_cell(auth_bin);
+        let lock_script = context
+            .build_script(&commitment_lock_out_point, Bytes::new().into())
+            .expect("script");
+
+        // prepare cell deps
+        let commitment_lock_dep = CellDep::new_builder()
+            .out_point(commitment_lock_out_point)
+            .build();
+        let auth_dep = CellDep::new_builder().out_point(auth_out_point).build();
+        let cell_deps = vec![commitment_lock_dep, auth_dep].pack();
+        Self {
+            context,
+            lock_script,
+            cell_deps,
+        }
+    }
+}
+
 #[test]
 fn test_commitment_lock_with_two_pending_htlcs() {
     // deploy contract
-    let mut context = Context::default();
-    let loader = Loader::default();
-    let commitment_lock_bin = loader.load_binary("commitment-lock");
-    let auth_bin = loader.load_binary("../../deps/auth");
-    let commitment_lock_out_point = context.deploy_cell(commitment_lock_bin);
-    let auth_out_point = context.deploy_cell(auth_bin);
+    let CommitmentLockContext {
+        mut context,
+        lock_script,
+        cell_deps,
+    } = CommitmentLockContext::new();
 
     // prepare script
     let mut generator = Generator::new();
@@ -346,16 +378,7 @@ fn test_commitment_lock_with_two_pending_htlcs() {
 
     let args = blake2b_256(&witness_script)[0..20].to_vec();
 
-    let lock_script = context
-        .build_script(&commitment_lock_out_point, args.into())
-        .expect("script");
-
-    // prepare cell deps
-    let commitment_lock_dep = CellDep::new_builder()
-        .out_point(commitment_lock_out_point)
-        .build();
-    let auth_dep = CellDep::new_builder().out_point(auth_out_point).build();
-    let cell_deps = vec![commitment_lock_dep, auth_dep].pack();
+    let lock_script = lock_script.as_builder().args(args.pack()).build();
 
     // prepare cells
     let input_out_point = context.create_cell(
