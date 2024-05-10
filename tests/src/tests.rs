@@ -392,256 +392,270 @@ fn test_commitment_lock_with_two_pending_htlcs() {
         .outputs_data(outputs_data.pack())
         .build();
 
-    // sign with revocation key
-    let message: [u8; 32] = tx.hash().as_slice().try_into().unwrap();
+    {
+        // sign with revocation key
+        let message: [u8; 32] = tx.hash().as_slice().try_into().unwrap();
 
-    let signature = revocation_key
-        .0
-        .sign_recoverable(&message.into())
-        .unwrap()
-        .serialize();
-    let witness = [witness_script.clone(), vec![0xFF], signature].concat();
+        let signature = revocation_key
+            .0
+            .sign_recoverable(&message.into())
+            .unwrap()
+            .serialize();
+        let witness = [witness_script.clone(), vec![0xFF], signature].concat();
 
-    let tx = tx.as_advanced_builder().witness(witness.pack()).build();
-    println!("tx: {:?}", tx);
+        let tx = tx.as_advanced_builder().witness(witness.pack()).build();
+        println!("tx: {:?}", tx);
 
-    // run
-    let cycles = context
-        .verify_tx(&tx, MAX_CYCLES)
-        .expect("pass verification");
-    println!("consume cycles: {}", cycles);
+        // run
+        let cycles = context
+            .verify_tx(&tx, MAX_CYCLES)
+            .expect("pass verification");
+        println!("consume cycles: {}", cycles);
+    }
 
-    // build transaction with local_delay_epoch unlock logic
-    // delay 48 hours
-    let since = Since::from_epoch(EpochNumberWithFraction::new(12, 0, 1), false);
-    let input = CellInput::new_builder()
-        .previous_output(input_out_point.clone())
-        .since(since.as_u64().pack())
-        .build();
+    {
+        // build transaction with local_delay_epoch unlock logic
+        // delay 48 hours
+        let since = Since::from_epoch(EpochNumberWithFraction::new(12, 0, 1), false);
+        let input = CellInput::new_builder()
+            .previous_output(input_out_point.clone())
+            .since(since.as_u64().pack())
+            .build();
 
-    let tx = TransactionBuilder::default()
-        .cell_deps(cell_deps.clone())
-        .input(input)
-        .outputs(outputs)
-        .outputs_data(outputs_data.pack())
-        .build();
+        let tx = TransactionBuilder::default()
+            .cell_deps(cell_deps.clone())
+            .input(input)
+            .outputs(outputs)
+            .outputs_data(outputs_data.pack())
+            .build();
 
-    // sign with local_delay_epoch_key
-    let message: [u8; 32] = tx.hash().as_slice().try_into().unwrap();
+        // sign with local_delay_epoch_key
+        let message: [u8; 32] = tx.hash().as_slice().try_into().unwrap();
 
-    let signature = local_delay_epoch_key
-        .0
-        .sign_recoverable(&message.into())
-        .unwrap()
-        .serialize();
-    let witness = [witness_script.clone(), vec![0xFF], signature].concat();
+        let signature = local_delay_epoch_key
+            .0
+            .sign_recoverable(&message.into())
+            .unwrap()
+            .serialize();
+        let witness = [witness_script.clone(), vec![0xFF], signature].concat();
 
-    let tx = tx.as_advanced_builder().witness(witness.pack()).build();
-    println!("tx: {:?}", tx);
+        let tx = tx.as_advanced_builder().witness(witness.pack()).build();
+        println!("tx: {:?}", tx);
 
-    // run
-    let cycles = context
-        .verify_tx(&tx, MAX_CYCLES)
-        .expect("pass verification");
-    println!("consume cycles: {}", cycles);
+        // run
+        let cycles = context
+            .verify_tx(&tx, MAX_CYCLES)
+            .expect("pass verification");
+        println!("consume cycles: {}", cycles);
+    }
 
-    // build transaction with remote_htlc_pubkey unlock offered pending htlc 1
-    let input = CellInput::new_builder()
-        .previous_output(input_out_point.clone())
-        .build();
+    {
+        // build transaction with remote_htlc_pubkey unlock offered pending htlc 1
+        let input = CellInput::new_builder()
+            .previous_output(input_out_point.clone())
+            .build();
 
-    let new_witness_script = [
-        local_delay_epoch.as_u64().to_le_bytes().to_vec(),
-        blake2b_256(local_delay_epoch_key.1.serialize())[0..20].to_vec(),
-        blake2b_256(revocation_key.1.serialize())[0..20].to_vec(),
-        [1u8].to_vec(),
-        payment_amount2.to_le_bytes().to_vec(),
-        blake2b_256(preimage2)[0..20].to_vec(),
-        blake2b_256(remote_htlc_key2.1.serialize())[0..20].to_vec(),
-        blake2b_256(local_htlc_key2.1.serialize())[0..20].to_vec(),
-        expiry2.as_u64().to_le_bytes().to_vec(),
-    ]
-    .concat();
-    let new_lock_script = lock_script
-        .clone()
-        .as_builder()
-        .args(blake2b_256(&new_witness_script)[0..20].to_vec().pack())
-        .build();
-    let outputs = vec![CellOutput::new_builder()
-        .capacity((1000 * BYTE_SHANNONS - payment_amount1 as u64).pack())
-        .lock(new_lock_script.clone())
-        .build()];
-    let outputs_data = vec![Bytes::new()];
-    let tx = TransactionBuilder::default()
-        .cell_deps(cell_deps.clone())
-        .input(input)
-        .outputs(outputs)
-        .outputs_data(outputs_data.pack())
-        .build();
+        let new_witness_script = [
+            local_delay_epoch.as_u64().to_le_bytes().to_vec(),
+            blake2b_256(local_delay_epoch_key.1.serialize())[0..20].to_vec(),
+            blake2b_256(revocation_key.1.serialize())[0..20].to_vec(),
+            [1u8].to_vec(),
+            payment_amount2.to_le_bytes().to_vec(),
+            blake2b_256(preimage2)[0..20].to_vec(),
+            blake2b_256(remote_htlc_key2.1.serialize())[0..20].to_vec(),
+            blake2b_256(local_htlc_key2.1.serialize())[0..20].to_vec(),
+            expiry2.as_u64().to_le_bytes().to_vec(),
+        ]
+        .concat();
+        let new_lock_script = lock_script
+            .clone()
+            .as_builder()
+            .args(blake2b_256(&new_witness_script)[0..20].to_vec().pack())
+            .build();
+        let outputs = vec![CellOutput::new_builder()
+            .capacity((1000 * BYTE_SHANNONS - payment_amount1 as u64).pack())
+            .lock(new_lock_script.clone())
+            .build()];
+        let outputs_data = vec![Bytes::new()];
+        let tx = TransactionBuilder::default()
+            .cell_deps(cell_deps.clone())
+            .input(input)
+            .outputs(outputs)
+            .outputs_data(outputs_data.pack())
+            .build();
 
-    // sign with remote_htlc_pubkey
-    let message: [u8; 32] = tx.hash().as_slice().try_into().unwrap();
+        // sign with remote_htlc_pubkey
+        let message: [u8; 32] = tx.hash().as_slice().try_into().unwrap();
 
-    let signature = remote_htlc_key1
-        .0
-        .sign_recoverable(&message.into())
-        .unwrap()
-        .serialize();
-    let witness = [
-        witness_script.clone(),
-        vec![0x00],
-        signature,
-        preimage1.to_vec(),
-    ]
-    .concat();
+        let signature = remote_htlc_key1
+            .0
+            .sign_recoverable(&message.into())
+            .unwrap()
+            .serialize();
+        let witness = [
+            witness_script.clone(),
+            vec![0x00],
+            signature,
+            preimage1.to_vec(),
+        ]
+        .concat();
 
-    let tx = tx.as_advanced_builder().witness(witness.pack()).build();
-    println!("tx: {:?}", tx);
+        let tx = tx.as_advanced_builder().witness(witness.pack()).build();
+        println!("tx: {:?}", tx);
 
-    // run
-    let cycles = context
-        .verify_tx(&tx, MAX_CYCLES)
-        .expect("pass verification");
-    println!("consume cycles: {}", cycles);
+        // run
+        let cycles = context
+            .verify_tx(&tx, MAX_CYCLES)
+            .expect("pass verification");
+        println!("consume cycles: {}", cycles);
 
-    // build transaction with local_htlc_pubkey unlock offered pending htlc 1
-    let since = Since::from_timestamp(1711976400 + 1000, true).unwrap();
+        // build transaction with local_htlc_pubkey unlock offered pending htlc 1
+        let since = Since::from_timestamp(1711976400 + 1000, true).unwrap();
 
-    let input = CellInput::new_builder()
-        .previous_output(input_out_point.clone())
-        .since(since.as_u64().pack())
-        .build();
-    let outputs = vec![CellOutput::new_builder()
-        .capacity((1000 * BYTE_SHANNONS).pack())
-        .lock(new_lock_script.clone())
-        .build()];
-    let outputs_data = vec![Bytes::new()];
-    let tx = TransactionBuilder::default()
-        .cell_deps(cell_deps.clone())
-        .input(input)
-        .outputs(outputs)
-        .outputs_data(outputs_data.pack())
-        .build();
+        let input = CellInput::new_builder()
+            .previous_output(input_out_point.clone())
+            .since(since.as_u64().pack())
+            .build();
+        let new_lock_script = lock_script
+            .clone()
+            .as_builder()
+            .args(blake2b_256(&new_witness_script)[0..20].to_vec().pack())
+            .build();
 
-    // sign with local_htlc_pubkey
-    let message: [u8; 32] = tx.hash().as_slice().try_into().unwrap();
+        let outputs = vec![CellOutput::new_builder()
+            .capacity((1000 * BYTE_SHANNONS).pack())
+            .lock(new_lock_script.clone())
+            .build()];
+        let outputs_data = vec![Bytes::new()];
+        let tx = TransactionBuilder::default()
+            .cell_deps(cell_deps.clone())
+            .input(input)
+            .outputs(outputs)
+            .outputs_data(outputs_data.pack())
+            .build();
 
-    let signature = local_htlc_key1
-        .0
-        .sign_recoverable(&message.into())
-        .unwrap()
-        .serialize();
-    let witness = [
-        witness_script.clone(),
-        vec![0x00],
-        signature,
-        preimage1.to_vec(),
-    ]
-    .concat();
+        // sign with local_htlc_pubkey
+        let message: [u8; 32] = tx.hash().as_slice().try_into().unwrap();
 
-    let tx = tx.as_advanced_builder().witness(witness.pack()).build();
-    println!("tx: {:?}", tx);
+        let signature = local_htlc_key1
+            .0
+            .sign_recoverable(&message.into())
+            .unwrap()
+            .serialize();
+        let witness = [
+            witness_script.clone(),
+            vec![0x00],
+            signature,
+            preimage1.to_vec(),
+        ]
+        .concat();
 
-    // run
-    let cycles = context
-        .verify_tx(&tx, MAX_CYCLES)
-        .expect("pass verification");
-    println!("consume cycles: {}", cycles);
+        let tx = tx.as_advanced_builder().witness(witness.pack()).build();
+        println!("tx: {:?}", tx);
 
-    // build transaction with remote_htlc_pubkey unlock received pending htlc 2
-    let since = Since::from_timestamp(1712062800 + 1000, true).unwrap();
-    let input = CellInput::new_builder()
-        .since(since.as_u64().pack())
-        .previous_output(input_out_point.clone())
-        .build();
+        // run
+        let cycles = context
+            .verify_tx(&tx, MAX_CYCLES)
+            .expect("pass verification");
+        println!("consume cycles: {}", cycles);
+    }
 
-    let new_witness_script = [
-        local_delay_epoch.as_u64().to_le_bytes().to_vec(),
-        blake2b_256(local_delay_epoch_key.1.serialize())[0..20].to_vec(),
-        blake2b_256(revocation_key.1.serialize())[0..20].to_vec(),
-        [0u8].to_vec(),
-        payment_amount1.to_le_bytes().to_vec(),
-        blake2b_256(preimage1)[0..20].to_vec(),
-        blake2b_256(remote_htlc_key1.1.serialize())[0..20].to_vec(),
-        blake2b_256(local_htlc_key1.1.serialize())[0..20].to_vec(),
-        expiry1.as_u64().to_le_bytes().to_vec(),
-    ]
-    .concat();
-    let new_lock_script = lock_script
-        .as_builder()
-        .args(blake2b_256(&new_witness_script)[0..20].to_vec().pack())
-        .build();
-    let outputs = vec![CellOutput::new_builder()
-        .capacity((1000 * BYTE_SHANNONS - payment_amount2 as u64).pack())
-        .lock(new_lock_script.clone())
-        .build()];
-    let outputs_data = vec![Bytes::new()];
-    let tx = TransactionBuilder::default()
-        .cell_deps(cell_deps.clone())
-        .input(input)
-        .outputs(outputs)
-        .outputs_data(outputs_data.pack())
-        .build();
+    {
+        // build transaction with remote_htlc_pubkey unlock received pending htlc 2
+        let since = Since::from_timestamp(1712062800 + 1000, true).unwrap();
+        let input = CellInput::new_builder()
+            .since(since.as_u64().pack())
+            .previous_output(input_out_point.clone())
+            .build();
 
-    // sign with remote_htlc_pubkey
-    let message: [u8; 32] = tx.hash().as_slice().try_into().unwrap();
+        let new_witness_script = [
+            local_delay_epoch.as_u64().to_le_bytes().to_vec(),
+            blake2b_256(local_delay_epoch_key.1.serialize())[0..20].to_vec(),
+            blake2b_256(revocation_key.1.serialize())[0..20].to_vec(),
+            [0u8].to_vec(),
+            payment_amount1.to_le_bytes().to_vec(),
+            blake2b_256(preimage1)[0..20].to_vec(),
+            blake2b_256(remote_htlc_key1.1.serialize())[0..20].to_vec(),
+            blake2b_256(local_htlc_key1.1.serialize())[0..20].to_vec(),
+            expiry1.as_u64().to_le_bytes().to_vec(),
+        ]
+        .concat();
+        let new_lock_script = lock_script
+            .as_builder()
+            .args(blake2b_256(&new_witness_script)[0..20].to_vec().pack())
+            .build();
+        let outputs = vec![CellOutput::new_builder()
+            .capacity((1000 * BYTE_SHANNONS - payment_amount2 as u64).pack())
+            .lock(new_lock_script.clone())
+            .build()];
+        let outputs_data = vec![Bytes::new()];
+        let tx = TransactionBuilder::default()
+            .cell_deps(cell_deps.clone())
+            .input(input)
+            .outputs(outputs)
+            .outputs_data(outputs_data.pack())
+            .build();
 
-    let signature = remote_htlc_key2
-        .0
-        .sign_recoverable(&message.into())
-        .unwrap()
-        .serialize();
-    let witness = [witness_script.clone(), vec![0x01], signature].concat();
+        // sign with remote_htlc_pubkey
+        let message: [u8; 32] = tx.hash().as_slice().try_into().unwrap();
 
-    let tx = tx.as_advanced_builder().witness(witness.pack()).build();
-    println!("tx: {:?}", tx);
+        let signature = remote_htlc_key2
+            .0
+            .sign_recoverable(&message.into())
+            .unwrap()
+            .serialize();
+        let witness = [witness_script.clone(), vec![0x01], signature].concat();
 
-    // run
-    let cycles = context
-        .verify_tx(&tx, MAX_CYCLES)
-        .expect("pass verification");
-    println!("consume cycles: {}", cycles);
+        let tx = tx.as_advanced_builder().witness(witness.pack()).build();
+        println!("tx: {:?}", tx);
 
-    // // build transaction with local_htlc_pubkey unlock received pending htlc 2
-    let input = CellInput::new_builder()
-        .previous_output(input_out_point.clone())
-        .build();
-    let outputs = vec![CellOutput::new_builder()
-        .capacity((1000 * BYTE_SHANNONS).pack())
-        .lock(new_lock_script.clone())
-        .build()];
-    let outputs_data = vec![Bytes::new()];
-    let tx = TransactionBuilder::default()
-        .cell_deps(cell_deps)
-        .input(input)
-        .outputs(outputs)
-        .outputs_data(outputs_data.pack())
-        .build();
+        // run
+        let cycles = context
+            .verify_tx(&tx, MAX_CYCLES)
+            .expect("pass verification");
+        println!("consume cycles: {}", cycles);
 
-    // sign with local_htlc_pubkey
-    let message: [u8; 32] = tx.hash().as_slice().try_into().unwrap();
+        // // build transaction with local_htlc_pubkey unlock received pending htlc 2
+        let input = CellInput::new_builder()
+            .previous_output(input_out_point.clone())
+            .build();
+        let outputs = vec![CellOutput::new_builder()
+            .capacity((1000 * BYTE_SHANNONS).pack())
+            .lock(new_lock_script.clone())
+            .build()];
+        let outputs_data = vec![Bytes::new()];
+        let tx = TransactionBuilder::default()
+            .cell_deps(cell_deps)
+            .input(input)
+            .outputs(outputs)
+            .outputs_data(outputs_data.pack())
+            .build();
 
-    let signature = local_htlc_key2
-        .0
-        .sign_recoverable(&message.into())
-        .unwrap()
-        .serialize();
-    let witness = [
-        witness_script.clone(),
-        vec![0x01],
-        signature,
-        preimage2.to_vec(),
-    ]
-    .concat();
+        // sign with local_htlc_pubkey
+        let message: [u8; 32] = tx.hash().as_slice().try_into().unwrap();
 
-    let tx = tx.as_advanced_builder().witness(witness.pack()).build();
-    println!("tx: {:?}", tx);
+        let signature = local_htlc_key2
+            .0
+            .sign_recoverable(&message.into())
+            .unwrap()
+            .serialize();
+        let witness = [
+            witness_script.clone(),
+            vec![0x01],
+            signature,
+            preimage2.to_vec(),
+        ]
+        .concat();
 
-    // run
-    let cycles = context
-        .verify_tx(&tx, MAX_CYCLES)
-        .expect("pass verification");
-    println!("consume cycles: {}", cycles);
+        let tx = tx.as_advanced_builder().witness(witness.pack()).build();
+        println!("tx: {:?}", tx);
+
+        // run
+        let cycles = context
+            .verify_tx(&tx, MAX_CYCLES)
+            .expect("pass verification");
+        println!("consume cycles: {}", cycles);
+    }
 }
 
 #[test]
