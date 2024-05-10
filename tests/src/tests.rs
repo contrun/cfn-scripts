@@ -1,7 +1,10 @@
 use super::*;
 use ckb_std::since::{EpochNumberWithFraction, Since};
 use ckb_testtool::{
-    ckb_crypto::secp::Generator,
+    ckb_crypto::{
+        self,
+        secp::{Generator, Pubkey},
+    },
     ckb_hash::blake2b_256,
     ckb_types::{bytes::Bytes, core::TransactionBuilder, packed::*, prelude::*},
     context::Context,
@@ -296,6 +299,53 @@ fn test_commitment_lock_no_pending_htlcs() {
     println!("consume cycles: {}", cycles);
 }
 
+type Hash = [u8; 32];
+
+/// A tlc output.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TLC {
+    /// The id of a received TLC. Must be empty if this is an offered HTLC.
+    /// We will fill in the id when we send this tlc to the counterparty.
+    /// Otherwise must be the next sequence number of the counterparty.
+    pub id: u64,
+    /// Is this HTLC being received by us or offered by us?
+    pub is_offered: bool,
+    /// The value as it appears in the commitment transaction
+    pub amount: u128,
+    /// The CLTV lock-time at which this HTLC expires.
+    pub lock_time: Since,
+    /// The hash of the preimage which unlocks this HTLC.
+    pub payment_hash: Hash,
+    /// The preimage of the hash to be sent to the counterparty.
+    pub payment_preimage: Option<Hash>,
+    pub local_pubkey: ckb_crypto::secp::Pubkey,
+    pub remote_pubkey: ckb_crypto::secp::Pubkey,
+}
+
+impl TLC {
+    fn new(
+        id: u64,
+        is_offered: bool,
+        amount: u128,
+        lock_time: Since,
+        payment_hash: Hash,
+        payment_preimage: Option<Hash>,
+        local_pubkey: ckb_crypto::secp::Pubkey,
+        remote_pubkey: ckb_crypto::secp::Pubkey,
+    ) -> Self {
+        Self {
+            id,
+            is_offered,
+            amount,
+            lock_time,
+            payment_hash,
+            payment_preimage,
+            local_pubkey,
+            remote_pubkey,
+        }
+    }
+}
+
 struct CommitmentLockContext {
     context: Context,
     lock_script: Script,
@@ -326,6 +376,118 @@ impl CommitmentLockContext {
             lock_script,
             cell_deps,
         }
+    }
+
+    fn get_witnesses(
+        &self,
+        local_delay_epoch: Since,
+        local_delay_epoch_key: Pubkey,
+        revocation_key: Pubkey,
+        tlcs: Vec<TLC>,
+    ) -> Vec<u8> {
+        // TODO: This was copied from the test below. It should be refactored to be more generic.
+        assert_eq!(tlcs.len(), 2);
+        let TLC {
+            amount: payment_amount1,
+            payment_hash: preimage1,
+            remote_pubkey: remote_htlc_key1,
+            local_pubkey: local_htlc_key1,
+            lock_time: expiry1,
+            ..
+        } = &tlcs[0];
+        let TLC {
+            amount: payment_amount2,
+            payment_hash: preimage2,
+            remote_pubkey: remote_htlc_key2,
+            local_pubkey: local_htlc_key2,
+            lock_time: expiry2,
+            ..
+        } = &tlcs[1];
+        let witness_script = [
+            local_delay_epoch.as_u64().to_le_bytes().to_vec(),
+            blake2b_256(local_delay_epoch_key.serialize())[0..20].to_vec(),
+            blake2b_256(revocation_key.serialize())[0..20].to_vec(),
+            [0u8].to_vec(),
+            payment_amount1.to_le_bytes().to_vec(),
+            blake2b_256(preimage1)[0..20].to_vec(),
+            blake2b_256(remote_htlc_key1.serialize())[0..20].to_vec(),
+            blake2b_256(local_htlc_key1.serialize())[0..20].to_vec(),
+            expiry1.as_u64().to_le_bytes().to_vec(),
+            [1u8].to_vec(),
+            payment_amount2.to_le_bytes().to_vec(),
+            blake2b_256(preimage2)[0..20].to_vec(),
+            blake2b_256(remote_htlc_key2.serialize())[0..20].to_vec(),
+            blake2b_256(local_htlc_key2.serialize())[0..20].to_vec(),
+            expiry2.as_u64().to_le_bytes().to_vec(),
+        ]
+        .concat();
+        witness_script
+    }
+
+    fn create_commitment_cell(
+        &mut self,
+        capacity: u64,
+        local_delay_epoch: Since,
+        local_delay_epoch_key: Pubkey,
+        revocation_key: Pubkey,
+        tlcs: Vec<TLC>,
+    ) -> OutPoint {
+        let witness_script = self.get_witnesses(
+            local_delay_epoch,
+            local_delay_epoch_key,
+            revocation_key,
+            tlcs,
+        );
+
+        let args = blake2b_256(&witness_script)[0..20].to_vec();
+
+        let lock_script = self
+            .lock_script
+            .clone()
+            .as_builder()
+            .args(args.pack())
+            .build();
+
+        // prepare cells
+        self.context.create_cell(
+            CellOutput::new_builder()
+                .capacity(capacity.pack())
+                .lock(lock_script.clone())
+                .build(),
+            Bytes::new(),
+        )
+    }
+
+    fn create_tx(
+        &mut self,
+        capacity: u64,
+        local_delay_epoch: Since,
+        local_delay_epoch_key: Pubkey,
+        revocation_key: Pubkey,
+        tlcs: Vec<TLC>,
+        outputs: Vec<CellOutput>,
+        outputs_data: Vec<Bytes>,
+    ) -> super::TransactionView {
+        let input_out_point = self.create_commitment_cell(
+            capacity,
+            local_delay_epoch,
+            local_delay_epoch_key,
+            revocation_key,
+            tlcs,
+        );
+
+        let input = CellInput::new_builder()
+            .previous_output(input_out_point.clone())
+            .build();
+
+        // build transaction with revocation unlock logic
+        let tx = TransactionBuilder::default()
+            .cell_deps(self.cell_deps.clone())
+            .input(input)
+            .outputs(outputs)
+            .outputs_data(outputs_data.pack())
+            .build();
+        tx
     }
 }
 
