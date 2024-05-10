@@ -303,7 +303,7 @@ fn test_commitment_lock_no_pending_htlcs() {
 }
 
 type ShortHash = [u8; 20];
-type Hash = [u8; 32];
+type PreImage = [u8; 32];
 
 /// A tlc output.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -319,9 +319,9 @@ pub struct TLC {
     /// The CLTV lock-time at which this HTLC expires.
     pub lock_time: Since,
     /// The hash of the preimage which unlocks this HTLC.
-    pub payment_hash: Hash,
+    pub payment_hash: ShortHash,
     /// The preimage of the hash to be sent to the counterparty.
-    pub payment_preimage: Option<Hash>,
+    pub payment_preimage: Option<PreImage>,
     pub local_pubkey: ckb_crypto::secp::Pubkey,
     pub remote_pubkey: ckb_crypto::secp::Pubkey,
 }
@@ -332,8 +332,8 @@ impl TLC {
         is_offered: bool,
         amount: u128,
         lock_time: Since,
-        payment_hash: Option<Hash>,
-        payment_preimage: Option<Hash>,
+        payment_hash: Option<ShortHash>,
+        payment_preimage: Option<PreImage>,
         local_pubkey: ckb_crypto::secp::Pubkey,
         remote_pubkey: ckb_crypto::secp::Pubkey,
     ) -> Self {
@@ -341,7 +341,7 @@ impl TLC {
             (Some(payment_hash), Some(payment_preimage)) => {
                 assert_eq!(
                     payment_hash,
-                    blake2b_256(payment_preimage),
+                    blake2b_256(payment_preimage)[..20],
                     "payment_hash must be the hash of payment_preimage"
                 );
                 (payment_hash, Some(payment_preimage))
@@ -349,7 +349,10 @@ impl TLC {
             (Some(payment_hash), None) => (payment_hash, None),
             (None, Some(payment_preimage)) => {
                 dbg!(blake2b_256(payment_preimage), Some(payment_preimage));
-                (blake2b_256(payment_preimage), Some(payment_preimage))
+                (
+                    blake2b_256(payment_preimage)[..20].try_into().unwrap(),
+                    Some(payment_preimage),
+                )
             }
             _ => {
                 panic!("Either payment_hash or payment_preimage must be provided");
