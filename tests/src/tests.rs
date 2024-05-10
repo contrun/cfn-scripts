@@ -1,3 +1,6 @@
+use core::panic;
+use std::io::Read;
+
 use super::*;
 use ckb_std::since::{EpochNumberWithFraction, Since};
 use ckb_testtool::{
@@ -329,11 +332,29 @@ impl TLC {
         is_offered: bool,
         amount: u128,
         lock_time: Since,
-        payment_hash: Hash,
+        payment_hash: Option<Hash>,
         payment_preimage: Option<Hash>,
         local_pubkey: ckb_crypto::secp::Pubkey,
         remote_pubkey: ckb_crypto::secp::Pubkey,
     ) -> Self {
+        let (payment_hash, payment_preimage) = match (payment_hash, payment_preimage) {
+            (Some(payment_hash), Some(payment_preimage)) => {
+                assert_eq!(
+                    payment_hash,
+                    blake2b_256(payment_preimage),
+                    "payment_hash must be the hash of payment_preimage"
+                );
+                (payment_hash, Some(payment_preimage))
+            }
+            (Some(payment_hash), None) => (payment_hash, None),
+            (None, Some(payment_preimage)) => {
+                dbg!(blake2b_256(payment_preimage), Some(payment_preimage));
+                (blake2b_256(payment_preimage), Some(payment_preimage))
+            }
+            _ => {
+                panic!("Either payment_hash or payment_preimage must be provided");
+            }
+        };
         Self {
             id,
             is_offered,
@@ -346,14 +367,8 @@ impl TLC {
         }
     }
 
-    fn get_hash(&self) -> Hash {
-        self.payment_preimage
-            .map(|x| blake2b_256(x))
-            .unwrap_or(self.payment_hash)
-    }
-
-    fn get_short_hash(&self) -> ShortHash {
-        self.get_hash()[0..20].try_into().unwrap()
+    fn get_hash(&self) -> ShortHash {
+        self.payment_hash[0..20].try_into().unwrap()
     }
 
     fn get_local_pubkey_hash(&self) -> ShortHash {
@@ -366,6 +381,18 @@ impl TLC {
         blake2b_256(self.remote_pubkey.serialize())[0..20]
             .try_into()
             .unwrap()
+    }
+
+    fn serialize_to_lock_args(&self) -> Vec<u8> {
+        [
+            (if self.is_offered { [0] } else { [1] }).to_vec(),
+            self.amount.to_le_bytes().to_vec(),
+            self.get_hash().to_vec(),
+            self.get_remote_pubkey_hash().to_vec(),
+            self.get_local_pubkey_hash().to_vec(),
+            self.lock_time.as_u64().to_le_bytes().to_vec(),
+        ]
+        .concat()
     }
 }
 
@@ -412,42 +439,14 @@ impl CommitmentLockContext {
         revocation_key: Pubkey,
         tlcs: Vec<TLC>,
     ) -> Vec<u8> {
-        // TODO: This was copied from the test below. It should be refactored to be more generic.
-        assert_eq!(tlcs.len(), 2);
-        let TLC {
-            amount: payment_amount1,
-            payment_hash: preimage1,
-            remote_pubkey: remote_htlc_key1,
-            local_pubkey: local_htlc_key1,
-            lock_time: expiry1,
-            is_offered: is_offered1,
-            ..
-        } = &tlcs[0];
-        let TLC {
-            amount: payment_amount2,
-            payment_hash: preimage2,
-            remote_pubkey: remote_htlc_key2,
-            local_pubkey: local_htlc_key2,
-            lock_time: expiry2,
-            is_offered: is_offered2,
-            ..
-        } = &tlcs[1];
         let witness_script = [
             local_delay_epoch.as_u64().to_le_bytes().to_vec(),
             blake2b_256(local_delay_epoch_key.serialize())[0..20].to_vec(),
             blake2b_256(revocation_key.serialize())[0..20].to_vec(),
-            (if *is_offered1 { [0] } else { [1] }).to_vec(),
-            payment_amount1.to_le_bytes().to_vec(),
-            blake2b_256(preimage1)[0..20].to_vec(),
-            blake2b_256(remote_htlc_key1.serialize())[0..20].to_vec(),
-            blake2b_256(local_htlc_key1.serialize())[0..20].to_vec(),
-            expiry1.as_u64().to_le_bytes().to_vec(),
-            (if *is_offered2 { [0] } else { [1] }).to_vec(),
-            payment_amount2.to_le_bytes().to_vec(),
-            blake2b_256(preimage2)[0..20].to_vec(),
-            blake2b_256(remote_htlc_key2.serialize())[0..20].to_vec(),
-            blake2b_256(local_htlc_key2.serialize())[0..20].to_vec(),
-            expiry2.as_u64().to_le_bytes().to_vec(),
+            tlcs.iter()
+                .map(|tlc| tlc.serialize_to_lock_args())
+                .flatten()
+                .collect(),
         ]
         .concat();
         witness_script
@@ -475,7 +474,6 @@ impl CommitmentLockContext {
             .build_script(&self.lock_script_outpoint, args.into())
             .expect("script");
 
-        // prepare cells
         (
             self.context.create_cell(
                 CellOutput::new_builder()
@@ -555,8 +553,8 @@ fn test_commitment_lock_with_two_pending_htlcs() {
             true,
             payment_amount1,
             expiry1,
-            preimage1,
             None,
+            Some(preimage1),
             local_htlc_key1.1.clone(),
             remote_htlc_key1.1.clone(),
         ),
@@ -565,8 +563,8 @@ fn test_commitment_lock_with_two_pending_htlcs() {
             false,
             payment_amount2,
             expiry2,
-            preimage2,
             None,
+            Some(preimage2),
             local_htlc_key2.1.clone(),
             remote_htlc_key2.1.clone(),
         ),
