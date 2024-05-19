@@ -3,6 +3,8 @@
 
 #[cfg(test)]
 extern crate alloc;
+use crate::alloc::format;
+use crate::alloc::string::ToString;
 
 use ckb_hash::blake2b_256;
 #[cfg(not(test))]
@@ -12,7 +14,7 @@ ckb_std::entry!(program_entry);
 #[cfg(not(test))]
 default_alloc!();
 
-use alloc::{ffi::CString, vec::Vec};
+use alloc::{ffi::CString, fmt::format, vec::Vec};
 use ckb_std::{
     ckb_constants::Source,
     ckb_types::{bytes::Bytes, core::ScriptHashType, prelude::*},
@@ -29,7 +31,7 @@ include!(concat!(env!("OUT_DIR"), "/auth_code_hash.rs"));
 
 #[repr(i8)]
 pub enum Error {
-    IndexOutOfBound = 1,
+    IndexOutOfBound,
     ItemMissing,
     LengthNotEnough,
     Encoding,
@@ -40,13 +42,14 @@ pub enum Error {
     InvalidHtlcType,
     ArgsLenError,
     WitnessLenError,
-    WitnessHashError,
+    WitnessHashError = 44,
     OutputCapacityError,
     OutputLockError,
     OutputTypeError,
     OutputUdtAmountError,
     PreimageError,
     AuthError,
+    MyError = 101,
 }
 
 impl From<SysError> for Error {
@@ -106,6 +109,8 @@ impl<'a> Htlc<'a> {
 }
 
 fn auth() -> Result<(), Error> {
+    ckb_std::syscalls::exit(43);
+    ckb_std::syscalls::debug("Hello world".to_string());
     // since local_delay_pubkey and revocation_pubkey are derived, the scripts are usually unique,
     // to simplify the implementation of the following unlocking logic, we check the number of inputs should be 1
     if load_input_since(1, Source::GroupInput).is_ok() {
@@ -144,9 +149,13 @@ fn auth() -> Result<(), Error> {
         } else {
             UNLOCK_WITH_SIGNATURE_LEN
         };
-    if blake2b_256(&witness[0..witness_script_len])[0..20] != args[0..20] {
-        return Err(Error::WitnessHashError);
+    for i in 0..witness_script_len {
+        let witness_i = format!("witness {i}: {:02x}", witness[i]);
+        ckb_std::syscalls::debug(witness_i);
     }
+    // if blake2b_256(&witness[0..witness_script_len])[0..20] != args[0..20] {
+    //     return Err(Error::WitnessHashError);
+    // }
 
     let unlock_type = witness[witness_script_len];
     let signature = witness[witness_script_len + 1..witness_script_len + 66].to_vec();
