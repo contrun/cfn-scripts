@@ -12,7 +12,7 @@ ckb_std::entry!(program_entry);
 #[cfg(not(test))]
 default_alloc!();
 
-use alloc::ffi::CString;
+use alloc::{ffi::CString, string::ToString};
 use ckb_std::{
     ckb_constants::Source,
     ckb_types::{bytes::Bytes, core::ScriptHashType, prelude::*},
@@ -95,6 +95,25 @@ fn auth() -> Result<(), Error> {
         pubkey_hash_str.as_c_str(),
     ];
 
-    exec_cell(&AUTH_CODE_HASH, ScriptHashType::Data1, &args).map_err(|_| Error::AuthError)?;
+    let result = exec_cell(&AUTH_CODE_HASH, ScriptHashType::Data1, &args);
+    match result {
+        Err(e) => {
+            match e {
+                SysError::IndexOutOfBound => {
+                    ckb_std::syscalls::debug("index out of bound".to_string())
+                }
+                SysError::ItemMissing => ckb_std::syscalls::debug("item missing".to_string()),
+
+                SysError::LengthNotEnough(_) => {
+                    ckb_std::syscalls::debug("length not enough".to_string())
+                }
+                SysError::Encoding => ckb_std::syscalls::debug("encoding".to_string()),
+                SysError::Unknown(_) => todo!(),
+            }
+            return Err(Error::AuthError);
+        }
+        Ok(_) => {}
+    }
+
     Ok(())
 }
