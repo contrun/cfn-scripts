@@ -75,7 +75,11 @@ fn auth() -> Result<(), Error> {
     }
     // Schnorr signature cannot recover the public key, so we need to provide the public key
     let pubkey_and_signature = witness[44..].to_vec();
+    ckb_std::debug!("version {}", encode(&version));
+    ckb_std::debug!("funding_out_point {}", encode(&funding_out_point));
+    ckb_std::debug!("tx_hash {}", encode(&tx_hash));
     let message = blake2b_256([version, funding_out_point, tx_hash.to_vec()].concat());
+    ckb_std::debug!("message to verify {}", encode(&message));
 
     let mut pubkey_hash = [0u8; 20];
     let script = load_script()?;
