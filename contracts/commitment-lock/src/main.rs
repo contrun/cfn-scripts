@@ -178,6 +178,12 @@ fn auth() -> Result<(), Error> {
             UNLOCK_WITH_SIGNATURE_LEN
         };
     if blake2b_256(&witness[0..witness_script_len])[0..20] != args[0..20] {
+        ckb_std::debug!(
+            "witnesses {:?}\nwitnesses hash {:?}\nargs {:?}",
+            &witness[0..witness_script_len],
+            blake2b_256(&witness[0..witness_script_len]),
+            args
+        );
         return Err(Error::WitnessHashError);
     }
 
@@ -337,6 +343,10 @@ fn auth() -> Result<(), Error> {
     let signature_str = CString::new(encode(signature)).unwrap();
     let message_str = CString::new(encode(message)).unwrap();
     let pubkey_hash_str = CString::new(encode(pubkey_hash)).unwrap();
+    ckb_std::debug!("algorithm_id: {:?}", algorithm_id_str);
+    ckb_std::debug!("signature: {:?}", signature_str);
+    ckb_std::debug!("message: {:?}", message_str);
+    ckb_std::debug!("pubkey_hash: {:?}", pubkey_hash_str);
 
     let args = [
         algorithm_id_str.as_c_str(),
@@ -345,6 +355,9 @@ fn auth() -> Result<(), Error> {
         pubkey_hash_str.as_c_str(),
     ];
 
-    exec_cell(&AUTH_CODE_HASH, ScriptHashType::Data1, &args).map_err(|_| Error::AuthError)?;
+    if let Err(err) = exec_cell(&AUTH_CODE_HASH, ScriptHashType::Data1, &args) {
+        ckb_std::debug!("exec ckb-auth error: {:?}", err);
+        return Err(Error::AuthError);
+    }
     Ok(())
 }
